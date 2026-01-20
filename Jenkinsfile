@@ -23,7 +23,8 @@ pipeline {
                 echo "Files in workspace:"
                 ls -l
 
-                zip -r function.zip lambda_function.py
+                echo "Zipping everything..."
+                zip -r function.zip .
 
                 echo "Zip file details:"
                 ls -lh function.zip
