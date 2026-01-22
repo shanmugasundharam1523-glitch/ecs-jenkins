@@ -1,0 +1,20 @@
+{
+  "family": "ecs-backend-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::204107104458:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "ecs-backend",
+      "image": "204107104458.dkr.ecr.ap-south-1.amazonaws.com/ecs-backend-repo:latest",
+      "portMappings": [
+        { "containerPort": 3000, "protocol": "tcp" }
+      ],
+      "essential": true
+    }
+  ]
+}
+
+
