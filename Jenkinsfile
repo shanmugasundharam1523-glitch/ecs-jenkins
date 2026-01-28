@@ -2,13 +2,11 @@ pipeline {
   agent any
 
   environment {
-    AWS_REGION   = "ap-south-1"
-    ECR_REPO     = "204107104458.dkr.ecr.ap-south-1.amazonaws.com/backend-app"
-    CLUSTER_NAME = "ecs-backend-cluster"
-    SERVICE_NAME = "ecs-backend-service"
-    TASK_FAMILY  = "ecs-backend-task"
-    CONTAINER_NAME = "ecs-backend-container"
-    IMAGE_TAG    = "${BUILD_NUMBER}"
+    AWS_REGION = "ap-south-1"
+    AWS_ACCOUNT_ID = "204107104458"
+    ECR_REPO = "204107104458.dkr.ecr.ap-south-1.amazonaws.com/backend-app"
+    EKS_CLUSTER = "my-eks-cluster"
+    IMAGE_TAG = "latest"
   }
 
   stages {
@@ -19,11 +17,20 @@ pipeline {
       }
     }
 
+    stage("Docker Check") {
+      steps {
+        sh '''
+          docker version
+        '''
+      }
+    }
+
     stage("Build Docker Image") {
       steps {
-        sh """
-          docker build -t ${ECR_REPO}:${IMAGE_TAG} .
-        """
+        sh '''
+          docker build -t backend-app .
+          docker tag backend-app:latest $ECR_REPO:$IMAGE_TAG
+        '''
       }
     }
 
@@ -31,77 +38,66 @@ pipeline {
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
                           credentialsId: 'aws-ecr-ecs-creds']]) {
-          sh """
-            aws ecr get-login-password --region ${AWS_REGION} \
-            | docker login --username AWS --password-stdin ${ECR_REPO}
-          """
+          sh '''
+            aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin $ECR_REPO
+          '''
         }
       }
     }
 
     stage("Push Image to ECR") {
       steps {
-        sh """
-          docker push ${ECR_REPO}:${IMAGE_TAG}
-        """
+        sh '''
+          docker push $ECR_REPO:$IMAGE_TAG
+        '''
       }
     }
 
-    stage("Register New Task Definition") {
+    stage("Configure kubeconfig") {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                          credentialsId: 'aws-ecr-ecs-creds']]) {
-          sh """
-            aws ecs describe-task-definition \
-              --task-definition ${TASK_FAMILY} \
-              --region ${AWS_REGION} \
-              --query taskDefinition \
-            | jq 'del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-              )
-              | .containerDefinitions[0].image = "${ECR_REPO}:${IMAGE_TAG}"' \
-            > new-task-def.json
-
-            aws ecs register-task-definition \
-              --cli-input-json file://new-task-def.json \
-              --region ${AWS_REGION}
-          """
-        }
+        sh '''
+          mkdir -p ~/.kube
+          aws eks update-kubeconfig \
+            --region $AWS_REGION \
+            --name $EKS_CLUSTER
+        '''
       }
     }
 
-    stage("Deploy to ECS") {
+    stage("Verify EKS Access") {
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding',
-                          credentialsId: 'aws-ecr-ecs-creds']]) {
-          sh """
-            aws ecs update-service \
-              --cluster ${CLUSTER_NAME} \
-              --service ${SERVICE_NAME} \
-              --task-definition ${TASK_FAMILY} \
-              --region ${AWS_REGION} \
-              --force-new-deployment
-          """
-        }
+        sh '''
+          kubectl get nodes
+        '''
+      }
+    }
+
+    stage("Deploy to EKS") {
+      steps {
+        sh '''
+          kubectl apply -f k8s/
+          kubectl rollout status deployment/backend
+        '''
+      }
+    }
+
+    stage("Verify Deployment") {
+      steps {
+        sh '''
+          kubectl get pods
+          kubectl get svc
+        '''
       }
     }
   }
 
   post {
     success {
-      echo "✅ Deployment successful! Image tag: ${IMAGE_TAG}"
+      echo "✅ EKS Deployment Successful!"
     }
     failure {
-      echo "❌ Deployment failed. Check logs."
+      echo "❌ Pipeline Failed. Check logs."
     }
     always {
       sh "docker image prune -f || true"
-    }
-  }
-}
