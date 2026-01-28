@@ -100,4 +100,8 @@ pipeline {
       echo "❌ Pipeline Failed. Check logs."
     }
     always {
-      sh "docker image prune -f || true"
+      sh "docker image prune -f || true"    
+    }
+  }
+}
+
